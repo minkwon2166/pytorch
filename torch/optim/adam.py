@@ -5,7 +5,6 @@ from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
                         _dispatch_sqrt, _capturable_doc, _differentiable_doc, _maximize_doc)
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
-from torch.optim._fused_utils import _MultiDeviceReplicator, _get_fp16AMP_params
 
 __all__ = ['Adam', 'adam']
 
@@ -64,7 +63,6 @@ class Adam(Optimizer):
     def _init_group(
         self,
         group,
-        grad_scaler,
         params_with_grad,
         grads,
         exp_avgs,
@@ -72,15 +70,6 @@ class Adam(Optimizer):
         max_exp_avg_sqs,
         state_steps
     ):
-
-        grad_scale = None
-        found_inf = None
-        if group['fused'] and grad_scaler is not None:
-            grad_scale = grad_scaler._get_scale_async()
-            device = grad_scale.device
-            grad_scale = _MultiDeviceReplicator(grad_scale)
-            found_inf = _get_fp16AMP_params(optimizer=self, grad_scaler=grad_scaler, device=device)
-
         for p in group['params']:
             if p.grad is not None:
                 params_with_grad.append(p)
@@ -113,10 +102,8 @@ class Adam(Optimizer):
                     raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode')
                 state_steps.append(state['step'])
 
-        return grad_scale, found_inf
-
     @_use_grad_for_differentiable
-    def step(self, closure=None, *, grad_scaler=None):
+    def step(self, closure=None):
         """Performs a single optimization step.
 
         Args:
@@ -141,9 +128,8 @@ class Adam(Optimizer):
             state_steps = []
             beta1, beta2 = group['betas']
 
-            grad_scale, found_inf = self._init_group(
+            self._init_group(
                 group,
-                grad_scaler,
                 params_with_grad,
                 grads,
                 exp_avgs,
@@ -168,8 +154,8 @@ class Adam(Optimizer):
                  capturable=group['capturable'],
                  differentiable=group['differentiable'],
                  fused=group['fused'],
-                 grad_scale=grad_scale,
-                 found_inf=found_inf)
+                 grad_scale=getattr(self, "grad_scale", None),
+                 found_inf=getattr(self, "found_inf", None))
 
         return loss
 
@@ -257,8 +243,8 @@ def adam(params: List[Tensor],
          capturable: bool = False,
          differentiable: bool = False,
          fused: Optional[bool] = None,
-         grad_scale: Optional[_MultiDeviceReplicator] = None,
-         found_inf: Optional[_MultiDeviceReplicator] = None,
+         grad_scale: Optional[Tensor] = None,
+         found_inf: Optional[Tensor] = None,
          *,
          amsgrad: bool,
          beta1: float,
@@ -329,8 +315,8 @@ def _single_tensor_adam(params: List[Tensor],
                         exp_avg_sqs: List[Tensor],
                         max_exp_avg_sqs: List[Tensor],
                         state_steps: List[Tensor],
-                        grad_scale: Optional[_MultiDeviceReplicator],
-                        found_inf: Optional[_MultiDeviceReplicator],
+                        grad_scale: Optional[Tensor],
+                        found_inf: Optional[Tensor],
                         *,
                         amsgrad: bool,
                         beta1: float,
@@ -425,8 +411,8 @@ def _multi_tensor_adam(params: List[Tensor],
                        exp_avg_sqs: List[Tensor],
                        max_exp_avg_sqs: List[Tensor],
                        state_steps: List[Tensor],
-                       grad_scale: Optional[_MultiDeviceReplicator],
-                       found_inf: Optional[_MultiDeviceReplicator],
+                       grad_scale: Optional[Tensor],
+                       found_inf: Optional[Tensor],
                        *,
                        amsgrad: bool,
                        beta1: float,
@@ -542,8 +528,8 @@ def _fused_adam(
     exp_avg_sqs: List[Tensor],
     max_exp_avg_sqs: List[Tensor],
     state_steps: List[Tensor],
-    grad_scale: Optional[_MultiDeviceReplicator],
-    found_inf: Optional[_MultiDeviceReplicator],
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
     *,
     amsgrad: bool,
     beta1: float,
@@ -556,6 +542,9 @@ def _fused_adam(
     differentiable: bool,
 ) -> None:
     grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
+    grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
+    found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     for (device, dtype) in grouped_tensors:
         (
             device_params,
@@ -566,8 +555,12 @@ def _fused_adam(
             device_state_steps,
         ) = grouped_tensors[(device, dtype)]
         if grad_scale is not None and found_inf is not None:
-            device_grad_scale = grad_scale.get(str(device))
-            device_found_inf = found_inf.get(str(device))
+            if device not in grad_scale_dict:
+                grad_scale_dict[device] = grad_scale.to(device, non_blocking=True)
+            if found_inf not in found_inf_dict:
+                found_inf_dict[device] = found_inf.to(device, non_blocking=True)
+            device_grad_scale = grad_scale_dict[device]
+            device_found_inf = found_inf_dict[device]
         else:
             device_grad_scale = None
             device_found_inf = None
