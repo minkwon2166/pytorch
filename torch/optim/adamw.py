@@ -22,7 +22,7 @@ class AdamW(Optimizer):
         foreach: Optional[bool] = None,
         capturable: bool = False,
         differentiable: bool = False,
-        fused: bool = False,
+        fused: Optional[bool] = None,
     ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -269,7 +269,7 @@ def adamw(
     foreach: Optional[bool] = None,
     capturable: bool = False,
     differentiable: bool = False,
-    fused: bool = False,
+    fused: Optional[bool] = None,
     grad_scale: Optional[Tensor] = None,
     found_inf: Optional[Tensor] = None,
     *,
