@@ -19,6 +19,9 @@ xml_key = StashKey["LogXMLReruns"]()
 
 def pytest_addoption(parser: Parser) -> None:
     group = parser.getgroup("terminal reporting")
+    group.addoption("--import-slow-tests", type=str, nargs='?')
+    group.addoption("--import-slow-tests", type=str, nargs='?')
+    group.add_argument('--rerun-disabled-tests', action='store_true')
     group.addoption(
         "--junit-xml-reruns",
         action="store",

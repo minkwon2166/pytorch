@@ -672,25 +672,25 @@ def sanitize_pytest_xml(xml_file: str):
         testcase.set("file", f"{file}.py")
     tree.write(xml_file)
 
+if SLOW_TESTS_FILE:
+    if os.path.exists(SLOW_TESTS_FILE):
+        with open(SLOW_TESTS_FILE, 'r') as fp:
+            slow_tests_dict = json.load(fp)
+            # use env vars so pytest-xdist subprocesses can still access them
+            os.environ['SLOW_TESTS_FILE'] = SLOW_TESTS_FILE
+    else:
+        warnings.warn(f'slow test file provided but not found: {SLOW_TESTS_FILE}')
+if DISABLED_TESTS_FILE:
+    if os.path.exists(DISABLED_TESTS_FILE):
+        with open(DISABLED_TESTS_FILE, 'r') as fp:
+            disabled_tests_dict = json.load(fp)
+            os.environ['DISABLED_TESTS_FILE'] = DISABLED_TESTS_FILE
+    else:
+        warnings.warn(f'disabled test file provided but not found: {DISABLED_TESTS_FILE}')
+
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
-    if SLOW_TESTS_FILE:
-        if os.path.exists(SLOW_TESTS_FILE):
-            with open(SLOW_TESTS_FILE, 'r') as fp:
-                global slow_tests_dict
-                slow_tests_dict = json.load(fp)
-                # use env vars so pytest-xdist subprocesses can still access them
-                os.environ['SLOW_TESTS_FILE'] = SLOW_TESTS_FILE
-        else:
-            warnings.warn(f'slow test file provided but not found: {SLOW_TESTS_FILE}')
-    if DISABLED_TESTS_FILE:
-        if os.path.exists(DISABLED_TESTS_FILE):
-            with open(DISABLED_TESTS_FILE, 'r') as fp:
-                global disabled_tests_dict
-                disabled_tests_dict = json.load(fp)
-                os.environ['DISABLED_TESTS_FILE'] = DISABLED_TESTS_FILE
-        else:
-            warnings.warn(f'disabled test file provided but not found: {DISABLED_TESTS_FILE}')
+
     # Determine the test launch mechanism
     if TEST_DISCOVER:
         _print_test_names()
@@ -1962,6 +1962,7 @@ def set_warn_always_context(new_val: bool):
 
 class NoTest():
     __test__ = False
+
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
     # atol values when comparing tensors. Used by @precisionOverride and @toleranceOverride, for

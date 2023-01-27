@@ -21,7 +21,10 @@ from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import (
     IS_CI,
     FILE_SCHEMA,
+    RERUN_DISABLED_TESTS,
     TEST_WITH_ROCM,
+    get_report_path,
+    sanitize_pytest_xml,
     shell,
     set_cwd,
     parser as common_parser,
@@ -443,7 +446,6 @@ def get_executable_command(options, allow_pytest, disable_coverage=False):
             )
     return executable
 
-
 def run_test(
     test_module,
     test_directory,
@@ -476,13 +478,14 @@ def run_test(
 
     # Extra arguments are not supported with pytest
     executable = get_executable_command(
-        options, allow_pytest=not extra_unittest_args
+        options, allow_pytest=True
     )
+    test_report_path = get_report_path(pytest=True)
     unittest_args.extend([
-        "--use-pytest",
         "-vv",
         "-rfEX",
         '--reruns=2'
+        f"--junit-xml-reruns={test_report_path}"
     ])
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
@@ -494,11 +497,18 @@ def run_test(
                                         suffix=".log")
     os.close(log_fd)
     command = (launcher_cmd or []) + executable + argv
+    new_env = {**(env or {}), "NO_COLOR": "1", "USING_PYTEST": "1"}
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
     with open(log_path, "w") as f:
-        ret_code = shell(command, test_directory, stdout=f, stderr=f, env=env)
+        ret_code = shell(command, test_directory, stdout=f, stderr=f, env=new_env)
     print_log_file(test_module, log_path, failed=(ret_code != 0))
     os.remove(log_path)
+
+    sanitize_pytest_xml(test_report_path)
+    print("If in CI, skip info is located in the xml test reports, please either go to s3 or the hud to download them")
+
+    if ret_code == 5 or RERUN_DISABLED_TESTS:
+        ret_code = 0
     return ret_code
 
 
