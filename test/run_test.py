@@ -484,7 +484,7 @@ def run_test(
     unittest_args.extend([
         "-vv",
         "-rfEX",
-        '--reruns=2'
+        '--reruns=2',
         f"--junit-xml-reruns={test_report_path}"
     ])
     # Can't call `python -m unittest test_*` here because it doesn't run code
