@@ -255,6 +255,9 @@ set_property(
     TARGET torch::cudart PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
+# nvToolsExt
+add_library(torch::nvtoolsext INTERFACE IMPORTED)
+
 # cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
 # interface library similar to cudart.
 add_library(caffe2::cublas INTERFACE IMPORTED)
