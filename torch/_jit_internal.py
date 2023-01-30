@@ -770,6 +770,16 @@ def is_ignored_fn(fn) -> bool:
     return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
 
+def _is_exact_ignored_fn(fn) -> bool:
+    mod = get_torchscript_modifier(fn)
+    return mod is FunctionModifiers.IGNORE
+
+
+def _is_exact_unused_fn(fn) -> bool:
+    mod = get_torchscript_modifier(fn)
+    return mod is FunctionModifiers.UNUSED
+
+
 def is_static_fn(cls, fn) -> bool:
     return isinstance(inspect.getattr_static(cls, fn, default=None), staticmethod)
 
