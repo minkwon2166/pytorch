@@ -492,7 +492,7 @@ class AccuracyError(Exception):
     pass
 
 
-def wrap_compiler_debug(compiler_fn, compiler_name: str):
+def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -501,9 +501,11 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
     to save the graph as a string.
     """
 
-    @functools.wraps(compiler_fn)
+    @functools.wraps(unconfigured_compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
         from torch._subclasses import FakeTensorMode
+
+        compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
 
         orig_graph = copy.deepcopy(gm.graph)
         assert config.repro_after in ("dynamo", "aot", None)
@@ -538,7 +540,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                         "Accuracy minification is supported for inductor only"
                     )
                 if inner_compiled_fn is None:
-                    inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                    inner_compiled_fn = compiler_fn(gm, example_inputs)
                 if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
                     log.warning("Accuracy failed for the AOT Autograd graph")
                     dump_compiler_graph_state(
@@ -560,7 +562,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                     # Call the compiler_fn - which is either aot_autograd or inductor
                     # with fake inputs
                     if inner_compiled_fn is None:
-                        inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                        inner_compiled_fn = compiler_fn(gm, example_inputs)
                     # Call the compiled function with real inputs
                     return inner_compiled_fn(real_inputs)
                 except Exception as e:
@@ -583,7 +585,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
             compiled_fn = deferred_for_real_inputs
             compiled_fn._boxed_call = True
         else:
-            compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+            compiled_fn = compiler_fn(gm, example_inputs)
 
         return compiled_fn
 
