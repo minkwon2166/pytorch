@@ -1,3 +1,4 @@
+import operator
 from typing import Dict, List, Optional
 
 import torch
@@ -99,6 +100,73 @@ class BaseListVariable(VariableTracker):
             return variables.ConstantVariable(result, **options)
 
         return super(BaseListVariable, self).call_method(tx, name, args, kwargs)
+
+    @staticmethod
+    def generic_list_compare(left, tx, op, right, **options):
+        from .builder import wrap_fx_proxy
+        from .tensor import DynamicShapeVariable
+
+        assert not (
+            left.is_python_constant() and right.is_python_constant()
+        ), "Illegal generic list compare on constant lists"
+
+        # Most list-like variables implement comparison ops the same way,
+        # so they can re-use this helper.
+        # There are quirks though, like how `tuple([2]) == torch.Size([2])`,
+        # but `tuple([2]) != list([2])`
+        if len(left.items) != len(right.items):
+            return ConstantVariable(False, **options)
+        if len(left.items) == 0:
+            return ConstantVariable(True, **options)
+
+        # Generic list comparison works by iterating over left aka self and right the compared-to list.
+        # If we hit here, their lengths are the same and they cannot be expressed as python constants.
+        # So, we iterate over the zipped list items.
+        equal = True
+        list_type = None
+        comps = []
+        for l_r in zip(left.items, right.items):
+            l = l_r[0]
+            r = l_r[1]
+            # When iterating over the zipped items, we invoke compare.
+            # .compare must return a DynamicShapeVariable, a TensorVariable,  or raise unimplemented
+            # If unimplemented is raised, we rely on checkpointing state to roll us back and not write these operations to the graph
+            comp = l.compare(tx, op, r, **options)
+            if list_type is None:
+                list_type = type(comp)
+            else:
+                assert (
+                    type(comp) == list_type
+                ), "Only single-type list comparison is supported atm"
+            comps.append(comp)
+
+        if len(comps) == 1:
+            return comps[0]
+
+        # Initial postiions
+        prev = comps[0]
+        for i in range(1, len(comps)):
+            # Target for comparison
+            curr = comps[i]
+            options = VariableTracker.propagate([prev, curr])
+
+            # Produces prev = operator.and_(prev, curr)
+            # This can be chained as needed, ex: operator.and_(operator.and_(comps[0], comps[1]), comps[2]) etc
+            if isinstance(prev, DynamicShapeVariable):
+                return DynamicShapeVariable.create(
+                    tx,
+                    (operator.and_)(prev.as_proxy(), curr.as_proxy()),
+                    dyn_shape=None,
+                    **options,
+                )
+            else:
+                prev = wrap_fx_proxy(
+                    tx,
+                    operator.and_(prev.as_proxy(), curr.as_proxy()),
+                    **options,
+                )
+
+        return prev
 
 
 class RangeVariable(BaseListVariable):
@@ -238,6 +306,11 @@ class ListVariable(BaseListVariable):
         else:
             return super().call_method(tx, name, args, kwargs)
 
+    def compare(self, tx, op, right, **options):
+        if not isinstance(right, ListVariable):
+            unimplemented(f"compare() {typestr(self)} {op} {typestr(right)}")
+        return BaseListVariable.generic_list_compare(self, tx, op, right, **options)
+
 
 class TupleVariable(BaseListVariable):
     def python_type(self):
@@ -272,6 +345,12 @@ class TupleVariable(BaseListVariable):
                 self.items + list(args[0].unpack_var_sequence(self)), **options
             )
         return super().call_method(tx, name, args, kwargs)
+
+    def compare(self, tx, op, right, **options):
+        # All tuple-like python constructs can be validly compared (e.g. torch.Size vs tuple)
+        if not isinstance(right, TupleVariable):
+            unimplemented(f"compare() {typestr(self)} {op} {typestr(right)}")
+        return BaseListVariable.generic_list_compare(self, tx, op, right, **options)
 
 
 class SizeVariable(TupleVariable):
