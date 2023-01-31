@@ -150,6 +150,58 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # TODO(jansel): FX doesn't support this, should add upstream support
         torch._dynamo.testing.standard_test(self, matmul_op1, 2, expected_ops=1)
 
+    def test_int_shape_binops(self):
+        def fn(x):
+            # Test reversal by putting int arg first.
+            y = 15 - x.shape[0]
+            y = 4 + y
+            y = 5 * y
+            y = 2 % y
+            y = 3 ** y
+            y = 10 // y
+            y = pow(2, y)
+            y = 10 / y
+            return y
+
+        torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=0, expected_ops_dynamic=10,
+                                            expected_frame_count=0, expected_frame_count_dynamic=1)
+
+    def test_param_shape_binops(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(15))
+
+            def forward(self, x):
+                # Test reversal by putting param shape arg first.
+                p = self.param.shape[0]
+                y = p - x.shape[0]
+                y = p + y
+                y = p * y
+                y = p % y
+                y = p ** y
+                y = p // y
+                y = pow(p, y)
+                y = p / y
+                return y
+
+        counts = torch._dynamo.testing.CompileCounter()
+        mod = MyModule()
+        optimized_mod = torch._dynamo.optimize(counts, nopython=True)(mod)
+
+        x = torch.randn(3)
+        ref = mod(x)
+        res = optimized_mod(x)
+
+        self.assertTrue(same(ref, res))
+        if torch._dynamo.testing.config.dynamic_shapes:
+            self.assertEqual(counts.frame_count, 1)
+            self.assertEqual(counts.op_count, 12)
+        else:
+            # constant folding
+            self.assertEqual(counts.frame_count, 0)
+            self.assertEqual(counts.op_count, 0)
+
     def test_builtin_isinstance(self):
         def fn(x):
             t = torch.arange(1, 3)
