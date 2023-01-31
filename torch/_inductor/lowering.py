@@ -3740,6 +3740,17 @@ def _realize(x):
     return clone(x)
 
 
+@register_lowering(aten.all_reduce)
+def allreduce(inputs, group_id, reduce_op):
+    # return TensorBox.create(
+    return ir.AllReduce.create(
+        inputs,
+        group_id,
+        reduce_op,
+    )
+    # )
+
+
 def _import_kernels():
     """
     Need to make sure all these get registered in the lowers dict
